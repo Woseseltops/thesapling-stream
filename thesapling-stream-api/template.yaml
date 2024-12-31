@@ -5,8 +5,14 @@ Description: >
 
   Sample SAM Template for thesapling-stream-api
 
+Parameters:
+  Environment:
+    Type: String
+    Description: The environment name (e.g., dev, prod)
+    Default: dev
+
 Resources:
-  CameraPositionsFunctionRole:
+  CameraPathProposalsFunctionRole:
     Type: AWS::IAM::Role
     Properties:
       AssumeRolePolicyDocument:
@@ -17,7 +23,7 @@ Resources:
               Service: lambda.amazonaws.com
             Action: sts:AssumeRole
       Policies:
-        - PolicyName: AccessToCameraPositionsDatabase
+        - PolicyName: AccessToCameraPathProposalsDatabase
           PolicyDocument:
             Version: '2012-10-17'
             Statement:
@@ -29,22 +35,26 @@ Resources:
                   - dynamodb:Scan
                   - dynamodb:UpdateItem
                   - dynamodb:DeleteItem
-                Resource: !GetAtt CameraPositionsDatabase.Arn  
+                Resource: !GetAtt CameraPathProposalsDatabase.Arn  
 
-  CameraPositionsFunction:
+  CameraPathProposalsFunction:
     Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
     Properties:
-      Role: !GetAtt CameraPositionsFunctionRole.Arn
-      CodeUri: camera_positions/
+      FunctionName: !Sub CameraPathProposalsFunction-${Environment}
+      Role: !GetAtt CameraPathProposalsFunctionRole.Arn
+      CodeUri: camera_path_proposals/
       Handler: app.lambda_handler
       Runtime: python3.13
       Architectures:
         - x86_64
+      Environment:
+        Variables:
+            CAMERA_PATH_PROPOSALS_TABLE: !Ref CameraPathProposalsDatabase
 
-  CameraPositionsDatabase:
+  CameraPathProposalsDatabase:
     Type: AWS::DynamoDB::Table
     Properties:
-      TableName: CameraPositions
+      TableName: !Sub CameraPathProposals-${Environment}
       AttributeDefinitions:
         - AttributeName: creator
           AttributeType: S
@@ -69,3 +79,96 @@ Resources:
               KeyType: HASH
           Projection:
             ProjectionType: ALL
+
+  CameraPathProposalsAPI:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Name: !Sub CameraPathProposalsAPI-${Environment}
+
+  CameraPathProposalsAPIResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref CameraPathProposalsAPI
+      ParentId: !GetAtt CameraPathProposalsAPI.RootResourceId
+      PathPart: camera-path-proposals
+
+  CameraPathProposalsAPIPutMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      AuthorizationType: NONE
+      HttpMethod: PUT
+      ResourceId: !Ref CameraPathProposalsAPIResource
+      RestApiId: !Ref CameraPathProposalsAPI
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${CameraPathProposalsFunction.Arn}/invocations
+
+  CameraPathProposalsAPIOptionsMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      AuthorizationType: NONE
+      HttpMethod: OPTIONS
+      ResourceId: !Ref CameraPathProposalsAPIResource
+      RestApiId: !Ref CameraPathProposalsAPI
+      Integration:
+        Type: MOCK
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+              method.response.header.Access-Control-Allow-Methods: "'POST,PUT,GET,OPTIONS'"
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+            ResponseTemplates:
+              application/json: ''
+        PassthroughBehavior: WHEN_NO_MATCH
+        RequestTemplates:
+          application/json: '{"statusCode": 200}'
+      MethodResponses:
+        - StatusCode: 200
+          ResponseModels:
+            application/json: Empty
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers: false
+            method.response.header.Access-Control-Allow-Methods: false
+            method.response.header.Access-Control-Allow-Origin: false
+
+  CameraPathProposalDetailAPIResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref CameraPathProposalsAPI
+      ParentId: !Ref CameraPathProposalsAPIResource
+      PathPart: '{camera-path-proposal-id}'
+
+  VoteAPIResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref CameraPathProposalsAPI
+      ParentId: !Ref CameraPathProposalDetailAPIResource
+      PathPart: vote
+
+  VoteAPIPutMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      AuthorizationType: NONE
+      HttpMethod: PUT
+      ResourceId: !Ref VoteAPIResource
+      RestApiId: !Ref CameraPathProposalsAPI
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${CameraPathProposalsFunction.Arn}/invocations
+
+  CameraPathProposalsAPIDeployment:
+    Type: AWS::ApiGateway::Deployment
+    DependsOn: CameraPathProposalsAPIPutMethod
+    Properties:
+      RestApiId: !Ref CameraPathProposalsAPI
+      StageName: !Ref Environment
+
+  APIInvokeFunctionPolicy:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt CameraPathProposalsFunction.Arn
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com

@@ -28,3 +28,16 @@ warm_containers = "EAGER"
 
 [default.local_start_lambda.parameters]
 warm_containers = "EAGER"
+
+[dev.deploy.parameters]
+stack_name = "thesapling-stream-api-dev"
+parameter_overrides = "Environment=dev"
+
+[staging.deploy.parameters]
+stack_name = "thesapling-stream-api-staging"
+parameter_overrides = "Environment=staging"
+
+[prod.deploy.parameters]
+stack_name = "thesapling-stream-api-prod"
+parameter_overrides = "Environment=prod"
+
